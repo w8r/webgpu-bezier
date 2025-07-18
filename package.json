@@ -1,0 +1,23 @@
+{
+  "name": "webgpu-bezier",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@webgpu/types": "^0.1.64",
+    "lil-gui": "^0.20.0",
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "stats-js": "^1.0.1"
+  }
+}

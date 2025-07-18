@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebGPU Bezier GPU Tessellation</title>
+    <script type="module" crossorigin src="/assets/index-pFJCWXEb.js"></script>
+  </head>
+  <body>
+    <div class="info">
+      <div>WebGPU Bezier Renderer - FLOWING CURVES</div>
+      <div>500 Long, Beautiful Curves</div>
+      <div>Mouse wheel: zoom, Click+drag: pan</div>
+      <div id="fps">FPS: --</div>
+      <div id="segments">Segments: 42</div>
+      <div id="curveInfo">Curves: 500</div>
+      <div id="triangles">Triangles: --</div>
+    </div>
+
+    <canvas id="canvas" width="1200" height="800"></canvas>
+
+    <div class="controls">
+      <div class="slider-container">
+        <label for="segmentSlider">Subdivision Level (4-128)</label>
+        <input
+          type="range"
+          id="segmentSlider"
+          min="4"
+          max="128"
+          value="42"
+          step="2"
+        />
+      </div>
+      <div class="slider-container">
+        <label for="curveCountSlider">Curve Count (1-1000)</label>
+        <input
+          type="range"
+          id="curveCountSlider"
+          min="1"
+          max="1000"
+          value="500"
+          step="10"
+        />
+      </div>
+      <br /><br />
+      <button onclick="regenerateCurves()" id="regenerate-curves">
+        Regenerate Curves
+      </button>
+      <button onclick="resetView()">Reset View</button>
+    </div>
+  </body>
+</html>

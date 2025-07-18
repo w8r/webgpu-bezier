@@ -1,0 +1,401 @@
+import shaderSource from "./shader.wgsl?raw";
+
+type Point = [number, number];
+
+type Curve = {
+  p0: Point;
+  p1: Point;
+  p2: Point;
+  color: [number, number, number];
+  thickness: number;
+};
+
+export class BezierRenderer {
+  canvas: HTMLCanvasElement;
+  device: GPUDevice;
+  context: GPUCanvasContext;
+  pipeline: GPURenderPipeline;
+  uniformBuffer: GPUBuffer;
+  bindGroup: GPUBindGroup;
+  vertexBuffer: GPUBuffer;
+  instanceBuffer: GPUBuffer;
+  private _segmentCount: number;
+  curveCount: number;
+  vertexCount: number;
+  // Camera state
+  zoom = 0.1;
+  panX = 0;
+  panY = 0;
+
+  // Mouse state
+  isDragging = false;
+  lastMouseX = 0;
+  lastMouseY = 0;
+  curves: Array<Curve> = [];
+  frameCount: number;
+  lastTime: number;
+  fps: number = 0;
+  triangles: number = 0;
+
+  constructor() {
+    this.canvas = document.getElementById("canvas") as HTMLCanvasElement;
+
+    // Tessellation parameters
+    this._segmentCount = 42;
+    this.curveCount = 500; // More reasonable count for artistic curves
+
+    // FPS tracking
+    this.frameCount = 0;
+    this.lastTime = performance.now();
+
+    this.setupEventListeners();
+  }
+
+  get segmentCount(): number {
+    return this._segmentCount;
+  }
+
+  set segmentCount(value: number) {
+    this._segmentCount = value;
+    this.updateBuffersForSegmentCount();
+    this.updateUniforms();
+  }
+
+  async initialize() {
+    const adapter = await navigator.gpu.requestAdapter();
+    this.device = await adapter!.requestDevice();
+
+    this.context = this.canvas.getContext("webgpu")!;
+    this.context.configure({
+      device: this.device,
+      format: "bgra8unorm",
+      alphaMode: "premultiplied",
+    });
+
+    await this.createPipeline();
+    this.createBuffers();
+    this.generateCurves();
+    this.startRenderLoop();
+  }
+
+  async createPipeline() {
+    const shaderModule = this.device.createShaderModule({
+      code: shaderSource,
+    });
+
+    // Create uniform buffer (now includes segment count)
+    this.uniformBuffer = this.device.createBuffer({
+      size: 64, // mat3x3 + vec2 + segmentCount + padding = 64 bytes
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const bindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+
+    this.bindGroup = this.device.createBindGroup({
+      layout: bindGroupLayout,
+      entries: [
+        {
+          binding: 0,
+          resource: { buffer: this.uniformBuffer },
+        },
+      ],
+    });
+
+    const pipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [bindGroupLayout],
+    });
+
+    this.pipeline = this.device.createRenderPipeline({
+      layout: pipelineLayout,
+      vertex: {
+        module: shaderModule,
+        entryPoint: "vs_main",
+        buffers: [
+          {
+            arrayStride: 4, // u32 vertexIndex
+            attributes: [{ shaderLocation: 0, offset: 0, format: "uint32" }],
+          },
+          {
+            arrayStride: 40, // 3*vec2 + vec3 + float = 8+8+8+12+4 = 40 bytes
+            stepMode: "instance",
+            attributes: [
+              { shaderLocation: 1, offset: 0, format: "float32x2" }, // p0: 8 bytes
+              { shaderLocation: 2, offset: 8, format: "float32x2" }, // p1: 8 bytes
+              { shaderLocation: 3, offset: 16, format: "float32x2" }, // p2: 8 bytes
+              { shaderLocation: 4, offset: 24, format: "float32x3" }, // color: 12 bytes
+              { shaderLocation: 5, offset: 36, format: "float32" }, // thickness: 4 bytes
+            ],
+          },
+        ],
+      },
+      fragment: {
+        module: shaderModule,
+        entryPoint: "fs_main",
+        targets: [
+          {
+            format: "bgra8unorm",
+            blend: {
+              color: {
+                srcFactor: "src-alpha",
+                dstFactor: "one-minus-src-alpha",
+                operation: "add",
+              },
+              alpha: {
+                srcFactor: "one",
+                dstFactor: "one-minus-src-alpha",
+                operation: "add",
+              },
+            },
+          },
+        ],
+      },
+      primitive: {
+        topology: "triangle-list",
+      },
+      multisample: {
+        count: 1,
+      },
+    });
+  }
+
+  createBuffers() {
+    // Create vertex buffer with indices for GPU tessellation
+    const verticesPerSegment = 6; // 2 triangles per segment
+    const totalVertices = this._segmentCount * verticesPerSegment;
+    const vertices = new Uint32Array(totalVertices);
+
+    for (let i = 0; i < totalVertices; i++) {
+      vertices[i] = i;
+    }
+
+    this.vertexBuffer = this.device.createBuffer({
+      size: vertices.byteLength,
+      usage: GPUBufferUsage.VERTEX,
+      mappedAtCreation: true,
+    });
+    new Uint32Array(this.vertexBuffer.getMappedRange()).set(vertices);
+    this.vertexBuffer.unmap();
+
+    this.vertexCount = totalVertices;
+  }
+
+  updateBuffersForSegmentCount() {
+    if (this.vertexBuffer) {
+      this.vertexBuffer.destroy();
+    }
+    this.createBuffers();
+  }
+
+  generateCurves() {
+    this.curves = [];
+    const width = this.canvas.width;
+    const height = this.canvas.height;
+
+    for (let i = 0; i < this.curveCount; i++) {
+      // Create longer, more flowing curves that span more of the screen
+      const startSide = Math.random();
+      let p0, p1, p2;
+
+      if (startSide < 0.25) {
+        // Start from left edge, flow across screen
+        p0 = [0, Math.random() * height];
+        p1 = [width * (0.3 + Math.random() * 0.4), Math.random() * height];
+        p2 = [width * (0.7 + Math.random() * 0.3), Math.random() * height];
+      } else if (startSide < 0.5) {
+        // Start from right edge, flow across screen
+        p0 = [width, Math.random() * height];
+        p1 = [width * (0.3 + Math.random() * 0.4), Math.random() * height];
+        p2 = [width * (0.0 + Math.random() * 0.3), Math.random() * height];
+      } else if (startSide < 0.75) {
+        // Start from top edge, flow down
+        p0 = [Math.random() * width, 0];
+        p1 = [Math.random() * width, height * (0.3 + Math.random() * 0.4)];
+        p2 = [Math.random() * width, height * (0.7 + Math.random() * 0.3)];
+      } else {
+        // Start from bottom edge, flow up
+        p0 = [Math.random() * width, height];
+        p1 = [Math.random() * width, height * (0.3 + Math.random() * 0.4)];
+        p2 = [Math.random() * width, height * (0.0 + Math.random() * 0.3)];
+      }
+
+      const curve: Curve = {
+        p0: p0,
+        p1: p1,
+        p2: p2,
+        color: [
+          Math.random() * 0.6 + 0.4, // Brighter colors
+          Math.random() * 0.6 + 0.4,
+          Math.random() * 0.6 + 0.4,
+        ],
+        thickness: Math.random() * 6 + 2, // Slightly thinner for elegance
+      };
+      this.curves.push(curve);
+    }
+
+    this.updateInstanceBuffer();
+  }
+
+  updateInstanceBuffer() {
+    if (this.instanceBuffer) {
+      this.instanceBuffer.destroy();
+    }
+
+    // Pack data: p0(8) + p1(8) + p2(8) + color.rg(8) + color.b+thickness(8) = 40 bytes per instance
+    const instanceData = new Float32Array(this.curves.length * 10);
+    for (let i = 0; i < this.curves.length; i++) {
+      const curve = this.curves[i];
+      const offset = i * 10;
+
+      instanceData[offset] = curve.p0[0]; // p0.x
+      instanceData[offset + 1] = curve.p0[1]; // p0.y
+      instanceData[offset + 2] = curve.p1[0]; // p1.x
+      instanceData[offset + 3] = curve.p1[1]; // p1.y
+      instanceData[offset + 4] = curve.p2[0]; // p2.x
+      instanceData[offset + 5] = curve.p2[1]; // p2.y
+      instanceData[offset + 6] = curve.color[0]; // color.r
+      instanceData[offset + 7] = curve.color[1]; // color.g
+      instanceData[offset + 8] = curve.color[2]; // color.b
+      instanceData[offset + 9] = curve.thickness; // thickness
+    }
+
+    this.instanceBuffer = this.device.createBuffer({
+      size: instanceData.byteLength,
+      usage: GPUBufferUsage.VERTEX,
+      mappedAtCreation: true,
+    });
+    new Float32Array(this.instanceBuffer.getMappedRange()).set(instanceData);
+    this.instanceBuffer.unmap();
+  }
+
+  updateUniforms() {
+    const width = this.canvas.width;
+    const height = this.canvas.height;
+
+    // Create view matrix
+    const scaleX = (2.0 * this.zoom) / width;
+    const scaleY = (-2.0 * this.zoom) / height;
+    const translateX = -1.0 + (2.0 * this.panX * this.zoom) / width;
+    const translateY = 1.0 + (2.0 * this.panY * this.zoom) / height;
+
+    // Create properly padded uniform data
+    const uniforms = new Float32Array(16);
+
+    // mat3x3 viewMatrix
+    uniforms[0] = scaleX;
+    uniforms[1] = 0;
+    uniforms[2] = 0;
+    uniforms[3] = 0;
+    uniforms[4] = 0;
+    uniforms[5] = scaleY;
+    uniforms[6] = 0;
+    uniforms[7] = 0;
+    uniforms[8] = translateX;
+    uniforms[9] = translateY;
+    uniforms[10] = 1;
+    uniforms[11] = 0;
+
+    // vec2 resolution + segmentCount + padding
+    uniforms[12] = width;
+    uniforms[13] = height;
+    uniforms[14] = this._segmentCount;
+    uniforms[15] = 0; // padding
+
+    this.device.queue.writeBuffer(this.uniformBuffer, 0, uniforms);
+  }
+
+  render() {
+    this.updateUniforms();
+
+    const commandEncoder = this.device.createCommandEncoder();
+
+    const renderPass = commandEncoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: this.context.getCurrentTexture().createView(),
+          clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+    });
+
+    renderPass.setPipeline(this.pipeline);
+    renderPass.setBindGroup(0, this.bindGroup);
+    renderPass.setVertexBuffer(0, this.vertexBuffer);
+    renderPass.setVertexBuffer(1, this.instanceBuffer);
+    renderPass.draw(this.vertexCount, this.curves.length);
+    renderPass.end();
+
+    this.device.queue.submit([commandEncoder.finish()]);
+  }
+
+  setupEventListeners() {
+    // Camera controls
+    this.canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+      this.zoom *= zoomFactor;
+      this.zoom = Math.max(0.1, Math.min(10.0, this.zoom));
+    });
+
+    this.canvas.addEventListener("mousedown", (e) => {
+      this.isDragging = true;
+      this.lastMouseX = e.clientX;
+      this.lastMouseY = e.clientY;
+    });
+
+    this.canvas.addEventListener("mousemove", (e) => {
+      if (this.isDragging) {
+        const deltaX = e.clientX - this.lastMouseX;
+        const deltaY = e.clientY - this.lastMouseY;
+
+        this.panX += deltaX / this.zoom;
+        this.panY -= deltaY / this.zoom;
+
+        this.lastMouseX = e.clientX;
+        this.lastMouseY = e.clientY;
+      }
+    });
+
+    this.canvas.addEventListener("mouseup", () => {
+      this.isDragging = false;
+    });
+
+    this.canvas.addEventListener("mouseleave", () => {
+      this.isDragging = false;
+    });
+
+    this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  }
+
+  updateFPS() {
+    this.frameCount++;
+    const currentTime = performance.now();
+    if (currentTime - this.lastTime >= 1000) {
+      this.fps = Math.round(
+        (this.frameCount * 1000) / (currentTime - this.lastTime)
+      );
+      this.triangles = this.curveCount * this.segmentCount * 2;
+
+      this.frameCount = 0;
+      this.lastTime = currentTime;
+    }
+  }
+
+  startRenderLoop() {
+    const renderFrame = () => {
+      this.render();
+      this.updateFPS();
+      requestAnimationFrame(renderFrame);
+    };
+    renderFrame();
+  }
+}
