@@ -10,6 +10,7 @@ const state = {
   segmentCount: 42,
   fps: 0,
   triangles: 0,
+  isCubic: true,
 };
 
 // Initialize GUI
@@ -26,6 +27,14 @@ gui
   .name("Segments per Curve")
   .onChange(() => {
     renderer.segmentCount = state.segmentCount;
+  });
+
+gui
+  .add(state, "isCubic")
+  .name("Cubic Bezier")
+  .onChange(() => {
+    renderer.isCubic = state.isCubic;
+    renderer.generateCurves();
   });
 
 gui

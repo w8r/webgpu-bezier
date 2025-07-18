@@ -6,6 +6,7 @@ type Curve = {
   p0: Point;
   p1: Point;
   p2: Point;
+  p3: Point;
   color: [number, number, number];
   thickness: number;
 };
@@ -22,6 +23,7 @@ export class BezierRenderer {
   private _segmentCount: number;
   curveCount: number;
   vertexCount: number;
+  isCubic: boolean = true;
   // Camera state
   zoom = 0.1;
   panX = 0;
@@ -124,14 +126,15 @@ export class BezierRenderer {
             attributes: [{ shaderLocation: 0, offset: 0, format: "uint32" }],
           },
           {
-            arrayStride: 40, // 3*vec2 + vec3 + float = 8+8+8+12+4 = 40 bytes
+            arrayStride: 48, // 4*vec2 + vec3 + float = 8+8+8+8+12+4 = 48 bytes
             stepMode: "instance",
             attributes: [
               { shaderLocation: 1, offset: 0, format: "float32x2" }, // p0: 8 bytes
               { shaderLocation: 2, offset: 8, format: "float32x2" }, // p1: 8 bytes
               { shaderLocation: 3, offset: 16, format: "float32x2" }, // p2: 8 bytes
-              { shaderLocation: 4, offset: 24, format: "float32x3" }, // color: 12 bytes
-              { shaderLocation: 5, offset: 36, format: "float32" }, // thickness: 4 bytes
+              { shaderLocation: 4, offset: 24, format: "float32x2" }, // p3: 8 bytes
+              { shaderLocation: 5, offset: 32, format: "float32x3" }, // color: 12 bytes
+              { shaderLocation: 6, offset: 44, format: "float32" }, // thickness: 4 bytes
             ],
           },
         ],
@@ -202,34 +205,69 @@ export class BezierRenderer {
     for (let i = 0; i < this.curveCount; i++) {
       // Create longer, more flowing curves that span more of the screen
       const startSide = Math.random();
-      let p0, p1, p2;
+      let p0: Point, p1: Point, p2: Point, p3: Point;
 
-      if (startSide < 0.25) {
-        // Start from left edge, flow across screen
-        p0 = [0, Math.random() * height];
-        p1 = [width * (0.3 + Math.random() * 0.4), Math.random() * height];
-        p2 = [width * (0.7 + Math.random() * 0.3), Math.random() * height];
-      } else if (startSide < 0.5) {
-        // Start from right edge, flow across screen
-        p0 = [width, Math.random() * height];
-        p1 = [width * (0.3 + Math.random() * 0.4), Math.random() * height];
-        p2 = [width * (0.0 + Math.random() * 0.3), Math.random() * height];
-      } else if (startSide < 0.75) {
-        // Start from top edge, flow down
-        p0 = [Math.random() * width, 0];
-        p1 = [Math.random() * width, height * (0.3 + Math.random() * 0.4)];
-        p2 = [Math.random() * width, height * (0.7 + Math.random() * 0.3)];
+      if (this.isCubic) {
+        // Cubic Bezier curves with 4 control points
+        if (startSide < 0.25) {
+          // Start from left edge, flow across screen
+          p0 = [0, Math.random() * height];
+          p1 = [width * (0.2 + Math.random() * 0.3), Math.random() * height];
+          p2 = [width * (0.5 + Math.random() * 0.3), Math.random() * height];
+          p3 = [width * (0.8 + Math.random() * 0.2), Math.random() * height];
+        } else if (startSide < 0.5) {
+          // Start from right edge, flow across screen
+          p0 = [width, Math.random() * height];
+          p1 = [width * (0.5 + Math.random() * 0.3), Math.random() * height];
+          p2 = [width * (0.2 + Math.random() * 0.3), Math.random() * height];
+          p3 = [width * (0.0 + Math.random() * 0.2), Math.random() * height];
+        } else if (startSide < 0.75) {
+          // Start from top edge, flow down
+          p0 = [Math.random() * width, 0];
+          p1 = [Math.random() * width, height * (0.2 + Math.random() * 0.3)];
+          p2 = [Math.random() * width, height * (0.5 + Math.random() * 0.3)];
+          p3 = [Math.random() * width, height * (0.8 + Math.random() * 0.2)];
+        } else {
+          // Start from bottom edge, flow up
+          p0 = [Math.random() * width, height];
+          p1 = [Math.random() * width, height * (0.5 + Math.random() * 0.3)];
+          p2 = [Math.random() * width, height * (0.2 + Math.random() * 0.3)];
+          p3 = [Math.random() * width, height * (0.0 + Math.random() * 0.2)];
+        }
       } else {
-        // Start from bottom edge, flow up
-        p0 = [Math.random() * width, height];
-        p1 = [Math.random() * width, height * (0.3 + Math.random() * 0.4)];
-        p2 = [Math.random() * width, height * (0.0 + Math.random() * 0.3)];
+        // Quadratic Bezier curves with 3 control points (p3 = p2 for compatibility)
+        if (startSide < 0.25) {
+          // Start from left edge, flow across screen
+          p0 = [0, Math.random() * height];
+          p1 = [width * (0.3 + Math.random() * 0.4), Math.random() * height];
+          p2 = [width * (0.7 + Math.random() * 0.3), Math.random() * height];
+          p3 = p2; // For quadratic, p3 = p2
+        } else if (startSide < 0.5) {
+          // Start from right edge, flow across screen
+          p0 = [width, Math.random() * height];
+          p1 = [width * (0.3 + Math.random() * 0.4), Math.random() * height];
+          p2 = [width * (0.0 + Math.random() * 0.3), Math.random() * height];
+          p3 = p2; // For quadratic, p3 = p2
+        } else if (startSide < 0.75) {
+          // Start from top edge, flow down
+          p0 = [Math.random() * width, 0];
+          p1 = [Math.random() * width, height * (0.3 + Math.random() * 0.4)];
+          p2 = [Math.random() * width, height * (0.7 + Math.random() * 0.3)];
+          p3 = p2; // For quadratic, p3 = p2
+        } else {
+          // Start from bottom edge, flow up
+          p0 = [Math.random() * width, height];
+          p1 = [Math.random() * width, height * (0.3 + Math.random() * 0.4)];
+          p2 = [Math.random() * width, height * (0.0 + Math.random() * 0.3)];
+          p3 = p2; // For quadratic, p3 = p2
+        }
       }
 
       const curve: Curve = {
         p0: p0,
         p1: p1,
         p2: p2,
+        p3: p3,
         color: [
           Math.random() * 0.6 + 0.4, // Brighter colors
           Math.random() * 0.6 + 0.4,
@@ -248,11 +286,11 @@ export class BezierRenderer {
       this.instanceBuffer.destroy();
     }
 
-    // Pack data: p0(8) + p1(8) + p2(8) + color.rg(8) + color.b+thickness(8) = 40 bytes per instance
-    const instanceData = new Float32Array(this.curves.length * 10);
+    // Pack data: p0(8) + p1(8) + p2(8) + p3(8) + color(12) + thickness(4) = 48 bytes per instance
+    const instanceData = new Float32Array(this.curves.length * 12);
     for (let i = 0; i < this.curves.length; i++) {
       const curve = this.curves[i];
-      const offset = i * 10;
+      const offset = i * 12;
 
       instanceData[offset] = curve.p0[0]; // p0.x
       instanceData[offset + 1] = curve.p0[1]; // p0.y
@@ -260,10 +298,12 @@ export class BezierRenderer {
       instanceData[offset + 3] = curve.p1[1]; // p1.y
       instanceData[offset + 4] = curve.p2[0]; // p2.x
       instanceData[offset + 5] = curve.p2[1]; // p2.y
-      instanceData[offset + 6] = curve.color[0]; // color.r
-      instanceData[offset + 7] = curve.color[1]; // color.g
-      instanceData[offset + 8] = curve.color[2]; // color.b
-      instanceData[offset + 9] = curve.thickness; // thickness
+      instanceData[offset + 6] = curve.p3[0]; // p3.x
+      instanceData[offset + 7] = curve.p3[1]; // p3.y
+      instanceData[offset + 8] = curve.color[0]; // color.r
+      instanceData[offset + 9] = curve.color[1]; // color.g
+      instanceData[offset + 10] = curve.color[2]; // color.b
+      instanceData[offset + 11] = curve.thickness; // thickness
     }
 
     this.instanceBuffer = this.device.createBuffer({

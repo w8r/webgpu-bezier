@@ -6,8 +6,9 @@ struct InstanceInput {
     @location(1) p0: vec2<f32>,
     @location(2) p1: vec2<f32>,
     @location(3) p2: vec2<f32>,
-    @location(4) color: vec3<f32>,
-    @location(5) thickness: f32,
+    @location(4) p3: vec2<f32>,
+    @location(5) color: vec3<f32>,
+    @location(6) thickness: f32,
 }
 
 struct VertexOutput {
@@ -27,13 +28,20 @@ struct Uniforms {
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
-fn evaluateBezier(t: f32, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> vec2<f32> {
+fn evaluateBezier(t: f32, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>) -> vec2<f32> {
     let oneMinusT = 1.0 - t;
-    return oneMinusT * oneMinusT * p0 + 2.0 * oneMinusT * t * p1 + t * t * p2;
+    let oneMinusT2 = oneMinusT * oneMinusT;
+    let oneMinusT3 = oneMinusT2 * oneMinusT;
+    let t2 = t * t;
+    let t3 = t2 * t;
+    return oneMinusT3 * p0 + 3.0 * oneMinusT2 * t * p1 + 3.0 * oneMinusT * t2 * p2 + t3 * p3;
 }
 
-fn evaluateBezierDerivative(t: f32, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> vec2<f32> {
-    return 2.0 * (1.0 - t) * (p1 - p0) + 2.0 * t * (p2 - p1);
+fn evaluateBezierDerivative(t: f32, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>) -> vec2<f32> {
+    let oneMinusT = 1.0 - t;
+    let oneMinusT2 = oneMinusT * oneMinusT;
+    let t2 = t * t;
+    return 3.0 * oneMinusT2 * (p1 - p0) + 6.0 * oneMinusT * t * (p2 - p1) + 3.0 * t2 * (p3 - p2);
 }
 
 @vertex
@@ -52,12 +60,12 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     let t1 = f32(segmentIndex + 1u) / f32(segmentCount);
 
     // Get the two points for this segment
-    let p0 = evaluateBezier(t0, instance.p0, instance.p1, instance.p2);
-    let p1 = evaluateBezier(t1, instance.p0, instance.p1, instance.p2);
+    let p0 = evaluateBezier(t0, instance.p0, instance.p1, instance.p2, instance.p3);
+    let p1 = evaluateBezier(t1, instance.p0, instance.p1, instance.p2, instance.p3);
 
     // Get derivatives for normals
-    let deriv0 = evaluateBezierDerivative(t0, instance.p0, instance.p1, instance.p2);
-    let deriv1 = evaluateBezierDerivative(t1, instance.p0, instance.p1, instance.p2);
+    let deriv0 = evaluateBezierDerivative(t0, instance.p0, instance.p1, instance.p2, instance.p3);
+    let deriv1 = evaluateBezierDerivative(t1, instance.p0, instance.p1, instance.p2, instance.p3);
 
     // Calculate normals (perpendicular to tangent)
     var normal0 = vec2<f32>(-deriv0.y, deriv0.x);
