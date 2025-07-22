@@ -1,3 +1,4 @@
+import { Camera } from "./camera";
 import shaderSource from "./shader.wgsl?raw";
 
 type Point = [number, number];
@@ -37,15 +38,20 @@ export class BezierRenderer extends EventTarget {
   lastTime: number;
   triangles: number = 0;
 
+  camera: Camera;
+
   constructor() {
     super();
     this.canvas = document.getElementById("canvas") as HTMLCanvasElement;
+    this.camera = new Camera(this.canvas);
 
     // Tessellation parameters
     this._segmentCount = 42;
     this.curveCount = 500; // More reasonable count for artistic curves
+  }
 
-    this.setupEventListeners();
+  getAspectRatio() {
+    return this.canvas.clientWidth / this.canvas.clientHeight;
   }
 
   get segmentCount(): number {
@@ -314,26 +320,22 @@ export class BezierRenderer extends EventTarget {
     const width = this.canvas.width;
     const height = this.canvas.height;
 
-    // Create view matrix
-    const scaleX = (2.0 * this.zoom) / width;
-    const scaleY = (-2.0 * this.zoom) / height;
-    const translateX = -1.0 + (2.0 * this.panX * this.zoom) / width;
-    const translateY = 1.0 + (2.0 * this.panY * this.zoom) / height;
+    const viewport = this.camera.getViewProjMatrix(this.getAspectRatio());
 
     // Create properly padded uniform data
     const uniforms = new Float32Array(16);
 
     // mat3x3 viewMatrix
-    uniforms[0] = scaleX;
+    uniforms[0] = viewport[0];
     uniforms[1] = 0;
     uniforms[2] = 0;
     uniforms[3] = 0;
     uniforms[4] = 0;
-    uniforms[5] = scaleY;
+    uniforms[5] = -viewport[5];
     uniforms[6] = 0;
     uniforms[7] = 0;
-    uniforms[8] = translateX;
-    uniforms[9] = translateY;
+    uniforms[8] = viewport[12];
+    uniforms[9] = viewport[13];
     uniforms[10] = 1;
     uniforms[11] = 0;
 
@@ -372,45 +374,6 @@ export class BezierRenderer extends EventTarget {
 
     this.device.queue.submit([commandEncoder.finish()]);
     this.dispatchEvent(new Event("afterRender"));
-  }
-
-  setupEventListeners() {
-    // Camera controls
-    this.canvas.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-      this.zoom *= zoomFactor;
-      this.zoom = Math.max(0.1, Math.min(10.0, this.zoom));
-    });
-
-    this.canvas.addEventListener("mousedown", (e) => {
-      this.isDragging = true;
-      this.lastMouseX = e.clientX;
-      this.lastMouseY = e.clientY;
-    });
-
-    this.canvas.addEventListener("mousemove", (e) => {
-      if (this.isDragging) {
-        const deltaX = e.clientX - this.lastMouseX;
-        const deltaY = e.clientY - this.lastMouseY;
-
-        this.panX += deltaX / this.zoom;
-        this.panY -= deltaY / this.zoom;
-
-        this.lastMouseX = e.clientX;
-        this.lastMouseY = e.clientY;
-      }
-    });
-
-    this.canvas.addEventListener("mouseup", () => {
-      this.isDragging = false;
-    });
-
-    this.canvas.addEventListener("mouseleave", () => {
-      this.isDragging = false;
-    });
-
-    this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
   startRenderLoop() {
