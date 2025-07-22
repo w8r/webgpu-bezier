@@ -11,7 +11,7 @@ type Curve = {
   thickness: number;
 };
 
-export class BezierRenderer {
+export class BezierRenderer extends EventTarget {
   canvas: HTMLCanvasElement;
   device: GPUDevice;
   context: GPUCanvasContext;
@@ -34,21 +34,16 @@ export class BezierRenderer {
   lastMouseX = 0;
   lastMouseY = 0;
   curves: Array<Curve> = [];
-  frameCount: number;
   lastTime: number;
-  fps: number = 0;
   triangles: number = 0;
 
   constructor() {
+    super();
     this.canvas = document.getElementById("canvas") as HTMLCanvasElement;
 
     // Tessellation parameters
     this._segmentCount = 42;
     this.curveCount = 500; // More reasonable count for artistic curves
-
-    // FPS tracking
-    this.frameCount = 0;
-    this.lastTime = performance.now();
 
     this.setupEventListeners();
   }
@@ -199,8 +194,8 @@ export class BezierRenderer {
 
   generateCurves() {
     this.curves = [];
-    const width = this.canvas.width;
-    const height = this.canvas.height;
+    const width = this.canvas.width * Math.sqrt(this.curveCount / 4);
+    const height = this.canvas.height * Math.sqrt(this.curveCount / 4);
 
     for (let i = 0; i < this.curveCount; i++) {
       // Create longer, more flowing curves that span more of the screen
@@ -352,6 +347,7 @@ export class BezierRenderer {
   }
 
   render() {
+    this.dispatchEvent(new Event("beforeRender"));
     this.updateUniforms();
 
     const commandEncoder = this.device.createCommandEncoder();
@@ -375,6 +371,7 @@ export class BezierRenderer {
     renderPass.end();
 
     this.device.queue.submit([commandEncoder.finish()]);
+    this.dispatchEvent(new Event("afterRender"));
   }
 
   setupEventListeners() {
@@ -416,24 +413,9 @@ export class BezierRenderer {
     this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
-  updateFPS() {
-    this.frameCount++;
-    const currentTime = performance.now();
-    if (currentTime - this.lastTime >= 1000) {
-      this.fps = Math.round(
-        (this.frameCount * 1000) / (currentTime - this.lastTime)
-      );
-      this.triangles = this.curveCount * this.segmentCount * 2;
-
-      this.frameCount = 0;
-      this.lastTime = currentTime;
-    }
-  }
-
   startRenderLoop() {
     const renderFrame = () => {
       this.render();
-      this.updateFPS();
       requestAnimationFrame(renderFrame);
     };
     renderFrame();
