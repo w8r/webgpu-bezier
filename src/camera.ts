@@ -15,9 +15,11 @@ export class Camera extends EventTarget {
 
   constructor(canvas: HTMLCanvasElement) {
     super();
+
+    console.log("Initializing Camera...", this.devicePixelRatio);
     this.canvas = canvas;
-    this.width = canvas.clientWidth / this.devicePixelRatio;
-    this.height = canvas.clientHeight / this.devicePixelRatio;
+    this.width = canvas.clientWidth * this.devicePixelRatio;
+    this.height = canvas.clientHeight * this.devicePixelRatio;
     this.position.x = (this.width / 2) * this.zoom;
     this.position.y = (-this.height / 2) * this.zoom;
 
@@ -31,8 +33,8 @@ export class Camera extends EventTarget {
   };
 
   updateCameraDimensions() {
-    this.width = this.canvas.width / this.devicePixelRatio;
-    this.height = this.canvas.height / this.devicePixelRatio;
+    this.width = this.canvas.width;
+    this.height = this.canvas.height;
   }
 
   private setupEventHandlers() {
